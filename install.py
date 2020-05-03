@@ -16,12 +16,17 @@ import configobj
 from weecfg.extension import ExtensionInstaller
 
 wmr89_config = """
-    [WMR89]
-        # The serial port of the WM89.
-        port = /dev/ttyUSB0
+[WMR89]
+    # This section is for the Oregon Scientific WMR89
 
-        # Maps from sensor name to observation name.
-        [[sensor_map]]
+    # Serial port such as /dev/ttyS0, /dev/ttyUSB0, or /dev/cuaU0
+    port = /dev/ttyUSB0
+
+    # The driver to use:
+    driver = weewx.drivers.wmr89
+    
+    # Sensor map: map from sensor name to observation name
+    [[sensor_map]]
 """
 
 wmr89_dict = configobj.ConfigObj(StringIO(wmr89_config))

@@ -1,47 +1,91 @@
-# Copyright (c) 2012 Will Page <compenguy@gmail.com>
-# See the file LICENSE.txt for your full rights.
 #
-# Derivative of vantage.py and wmr100.py, credit to Tom Keffer
-
-"""Classes and functions for interfacing with Oregon Scientific  WMR89,
+#    Copyright (c) 2012=2020 Will Page <compenguy@gmail.com>
+#    and Tom Keffer <tkeffer@gmail.com>
+#
+#    See the file LICENSE.txt for your full rights.
+#
+"""Classes and functions for interfacing with Oregon Scientific WMR89,
 
 See 
   https://www.wxforum.net/index.php?topic=27581
 for documentation on the serial protocol
-
 """
 
+from __future__ import absolute_import
+from __future__ import print_function
+import sys
 import time
-import operator
 import syslog
 
 import serial
 
 import weewx.drivers
 
-from math import exp
+# ##########################################
+# The following was lifted from the utility 'six'
+# Copyright (c) 2010-2018 Benjamin Peterson
+PY2 = sys.version_info[0] == 2
+PY3 = sys.version_info[0] == 3
+
+if PY2:
+    def byte2int(bs):
+        return ord(bs[0])
+if PY3:
+    import operator
+    byte2int = operator.itemgetter(0)
+# ##########################################
 
 DRIVER_NAME = 'WMR89'
-DRIVER_VERSION = "0.1.1"
+DRIVER_VERSION = "1.0.0"
 DEFAULT_PORT = '/dev/ttyS0'
+
 
 def loader(config_dict, engine):  # @UnusedVariable
     return WMR89(**config_dict[DRIVER_NAME])
 
+
 def confeditor_loader():
     return WMR89ConfEditor()
 
-def logmsg(level, msg):
-    syslog.syslog(level, 'wmr89: %s' % msg)
 
-def logdbg(msg):
-    logmsg(syslog.LOG_DEBUG, msg)
+try:
+    # Test for new-style weewx logging by trying to import weeutil.logger
+    import weeutil.logger
+    import logging
 
-def loginf(msg):
-    logmsg(syslog.LOG_INFO, msg)
+    log = logging.getLogger(__name__)
 
-def logerr(msg):
-    logmsg(syslog.LOG_ERR, msg)
+
+    def logdbg(msg):
+        log.debug(msg)
+
+
+    def loginf(msg):
+        log.info(msg)
+
+
+    def logerr(msg):
+        log.error(msg)
+
+except ImportError:
+    # Old-style weewx logging
+    import syslog
+
+
+    def logmsg(level, msg):
+        syslog.syslog(level, 'wmr89: %s:' % msg)
+
+
+    def logdbg(msg):
+        logmsg(syslog.LOG_DEBUG, msg)
+
+
+    def loginf(msg):
+        logmsg(syslog.LOG_INFO, msg)
+
+
+    def logerr(msg):
+        logmsg(syslog.LOG_ERR, msg)
 
 
 class WMR89ProtocolError(weewx.WeeWxIOError):
@@ -51,17 +95,19 @@ class WMR89ProtocolError(weewx.WeeWxIOError):
 class SerialWrapper(object):
     """Wraps a serial connection returned from package serial"""
 
+    # WMR89 specific settings
+    serialconfig = {
+        "baudrate": 128000,
+        "bytesize": serial.EIGHTBITS,
+        "parity": serial.PARITY_NONE,
+        "stopbits": serial.STOPBITS_ONE,
+        "timeout": 2,
+        "xonxoff": False
+    }
+
     def __init__(self, port):
-        self.port = port
-        # WMR89 specific settings
-        self.serialconfig = {
-            "baudrate": 128000,
-            "bytesize": serial.EIGHTBITS,
-            "parity": serial.PARITY_NONE,
-            "stopbits": serial.STOPBITS_ONE,
-            "timeout": 2,
-            "xonxoff": False
-        }
+        self.serial_port = serial.Serial(port, **SerialWrapper.serialconfig)
+        logdbg("Opened up serial port %s" % port)
 
     def flush_input(self):
         self.serial_port.flushInput()
@@ -77,28 +123,25 @@ class SerialWrapper(object):
         return _buffer
 
     def readAll(self):
-        _buffer = ''  
-        while self.serial_port.inWaiting()>0:
-          _buffer += self.serial_port.read()
+        _buffer = bytearray()
+        while self.serial_port.inWaiting() > 0:
+            _buffer += self.serial_port.read()
         return _buffer
 
     def inWaiting(self):
-        return self.serial_port.inWaiting() 
-    
+        return self.serial_port.inWaiting()
+
     def write(self, buf):
         self.serial_port.write(buf)
 
-    def openPort(self):
-        # Open up the port and store it
-        self.serial_port = serial.Serial(self.port, **self.serialconfig)
-        logdbg("Opened up serial port %s" % self.port)
-
     def closePort(self):
         self.serial_port.close()
+        self.serial_port = None
 
-#==============================================================================
+
+# ==============================================================================
 #                           Class WMR89
-#==============================================================================
+# ==============================================================================
 
 class WMR89(weewx.drivers.AbstractDevice):
     """Driver for the Oregon Scientific WMR89 console.
@@ -135,8 +178,8 @@ class WMR89(weewx.drivers.AbstractDevice):
         'extraHumid8': 'humidity_8',
         'inTempBatteryStatus': 'battery_status_in',
         'outTempBatteryStatus': 'battery_status_out',
-        'extraBatteryStatus1': 'battery_status_1', # was batteryStatusTHx
-        'extraBatteryStatus2': 'battery_status_2', # or batteryStatusTx
+        'extraBatteryStatus1': 'battery_status_1',  # was batteryStatusTHx
+        'extraBatteryStatus2': 'battery_status_2',  # or batteryStatusTx
         'extraBatteryStatus3': 'battery_status_3',
         'extraBatteryStatus4': 'battery_status_4',
         'extraBatteryStatus5': 'battery_status_5',
@@ -168,22 +211,17 @@ class WMR89(weewx.drivers.AbstractDevice):
 
         NAMED ARGUMENTS:
 
-        model: Which station model is this?
-        [Optional. Default is 'WMR89']
+        model: Which station model is this? [Optional. Default is 'WMR89']
 
-        port: The serial port of the WM89.
-        [Required if serial communication]
+        port: The serial port of the WMR89. [Optional. Default is '/dev/ttyUSB0']
 
-        baudrate: Baudrate of the port.
-        [Optional. Default 9600]
-
-        timeout: How long to wait before giving up on a response from the
-        serial port.
-        [Optional. Default is 5]
+        sensor_map: A dictionary that maps sensor names to emitted observation names. [Optional. Default is given by
+        WMR89.DEFAULT_MAP.]
         """
 
         loginf('driver version is %s' % DRIVER_VERSION)
         self.model = stn_dict.get('model', 'WMR89')
+        self.port = stn_dict.get('port', '/dev/ttyUSB0')
         self.sensor_map = dict(self.DEFAULT_MAP)
         if 'sensor_map' in stn_dict:
             self.sensor_map.update(stn_dict['sensor_map'])
@@ -191,66 +229,58 @@ class WMR89(weewx.drivers.AbstractDevice):
         self.last_rain_total = None
 
         # Create the specified port
-        self.port = WMR89._port_factory(stn_dict)
-
-        # Open it up:
-        self.port.openPort()
+        self.serial_wrapper = SerialWrapper(self.port)
 
     @property
     def hardware_name(self):
         return self.model
 
-    def openPort(self):
-        """Open up the connection to the console"""
-        self.port.openPort()
-
     def closePort(self):
         """Close the connection to the console. """
-        self.port.closePort()
+        self.serial_wrapper.closePort()
 
     def genLoopPackets(self):
         """Generator function that continuously returns loop packets"""
         buf = []
         while True:
             # request data 
-            if self.port.inWaiting()==0:
-                self.port.write('d100'.decode("hex"))
+            if self.serial_wrapper.inWaiting() == 0:
+                self.serial_wrapper.write(b'\xd1\x00')
                 time.sleep(0.5)
 
             # read data
-            buf = self.port.readAll()
+            buf = self.serial_wrapper.readAll()
 
-            if len(buf) > 0 :
-               decode = buf.split('f2f2'.decode('hex'))
-               decode = filter(None,decode)
-               #loop all packages 
-               for i in range(len(decode)):
-                 logdbg("Received WMR89 data packet: %s" % decode[i].encode('hex'))
-                 _record = None
-                 if weewx.debug >= 2:
-                    self.log_packet(decode[i])
+            if buf:
+                # The start of each packet is demarcated with the hex sequence 0xf2f2. Separate them, while getting
+                # rid of any zeros
+                raw_packets = [_f for _f in buf.split(b'\xf2\xf2') if _f]
+                # Loop over each packet
+                for raw_packet in raw_packets:
+                    if weewx.debug >= 2:
+                        self.log_packet(raw_packet)
 
-                 if decode[i][0].encode('hex')=='b0': #date/time NOK
-                    _record = self._wmr89_time_packet(decode[i])
-                 elif decode[i][0].encode('hex')=='b1': #Rain NOK
-                    _record = self._wmr89_rain_packet(decode[i])
-                 elif decode[i][0].encode('hex')=='b2': #Wind OK 
-                    _record = self._wmr89_wind_packet(decode[i])
-                 elif decode[i][0].encode('hex')=='b4': #Pressure OK
-                    _record = self._wmr89_pressure_packet(decode[i])
-                 elif decode[i][0].encode('hex')=='b5':#T/Hum  OK
-                    _record = self._wmr89_temp_packet(decode[i])
-                 else:
-                    logdbg("Invalid data packet (%s)." % decode[i].encode('hex'))
+                    packet = None
 
-                 if _record is not None:
-                   _record = self._sensors_to_fields(_record, self.sensor_map)
-                 
-                 if _record is not None:
-                        #print _record
-                        yield _record
- 
- 
+                    if raw_packet[0] == 0xb0:  # date/time NOK
+                        packet = self._wmr89_time_packet(raw_packet)
+                    elif raw_packet[0] == 0xb1:  # Rain NOK
+                        packet = self._wmr89_rain_packet(raw_packet)
+                    elif raw_packet[0] == 0xb2:  # Wind OK
+                        packet = self._wmr89_wind_packet(raw_packet)
+                    elif raw_packet[0] == 0xb4:  # Pressure OK
+                        packet = self._wmr89_pressure_packet(raw_packet)
+                    elif raw_packet[0] == 0xb5:  # T/Hum  OK
+                        packet = self._wmr89_temp_packet(raw_packet)
+                    else:
+                        logdbg("Invalid data packet (%s)." % raw_packet)
+
+                    if packet:
+                        mapped_packet = self._sensors_to_fields(packet, self.sensor_map)
+
+                    if mapped_packet:
+                        # print _record
+                        yield mapped_packet
 
     @staticmethod
     def _sensors_to_fields(oldrec, sensor_map):
@@ -266,51 +296,39 @@ class WMR89(weewx.drivers.AbstractDevice):
                 return newrec
         return None
 
-    #==========================================================================
+    # ==========================================================================
     #              Oregon Scientific WMR89 utility functions
-    #==========================================================================
-
-    @staticmethod
-    def _port_factory(stn_dict):
-        """Produce a serial port object"""
-
-        # Get the connection type. If it is not specified, assume 'serial':
-        connection_type = stn_dict.get('type', 'serial').lower()
-
-        if connection_type == "serial":
-            port = stn_dict['port']
-            return SerialWrapper(port)
-        raise weewx.UnsupportedFeature(stn_dict['type'])
+    # ==========================================================================
 
     def log_packet(self, packet):
-        #packet_str = ','.join(["x%x" % v for v in packet])
-        print "%d, %s, %s" % (int(time.time() + 0.5), time.asctime(), packet.encode('hex'))
+        # packet_str = ','.join(["x%x" % v for v in packet])
+        print("%d, %s, %s" % (int(time.time() + 0.5), time.asctime(), packet.encode('hex')))
 
     def _wmr89_wind_packet(self, packet):
         """Decode a wind packet. Wind speed will be in kph"""
         ## 0  1  2  3  4  5  6  7  8  9  10 
         ## b2 0b 00 00 00 00 00 02 7f 01 3e
         ##    ?     Wa    Wg    Wd Wc ?  CS?
-        Wa=(ord(packet[3])*0.36)
-        Wg=(ord(packet[5])*0.36)
-        Wd=(ord(packet[7])*22.5)
-        Wc=ord(packet[8])  
-        if Wc<125:
-          Wc=((ord(packet[8])-32)*5/9)
-        elif Wc==125:
-          Wc=None
-        elif Wc>125:
-          Wc=(((Wc-255)-32)*5/9)        
+        Wa = byte2int(packet[3]) * 0.36
+        Wg = byte2int(packet[5]) * 0.36
+        Wd = byte2int(packet[7]) * 22.5
+        Wc = byte2int(packet[8])
+        if Wc < 125:
+            Wc = (byte2int(packet[8]) - 32) * 5.0 / 9.0
+        elif Wc == 125:
+            Wc = None
+        elif Wc > 125:
+            Wc = (((Wc - 255) - 32) * 5.0 / 9.0)
 
         _record = {
-            'wind_speed': float(Wa),
-            'wind_dir': float(Wd),
+            'wind_speed': Wa,
+            'wind_dir': Wd,
             'dateTime': int(time.time() + 0.5),
             'usUnits': weewx.METRIC,
-            'wind_gust': float(Wg),
+            'wind_gust': Wg,
             'windchill': Wc
         }
-        
+
         return _record
 
     def _wmr89_rain_packet(self, packet):
@@ -325,19 +343,17 @@ class WMR89(weewx.drivers.AbstractDevice):
 
         # byte 2-3: rain per hour  
         # fffe = no value
-        if packet[2:4].encode('hex')=='fffe':
-           Rh = None
+        if packet[2:4] == b'\xff\xfe':
+            Rh = None
         else:
-           Rh = (256*ord(packet[2])+ord(packet[3]))*2.54/100 
+            Rh = (256 * byte2int(packet[2]) + byte2int(packet[3])) * 2.54 / 100
 
         # byte 4-5: actual rain /100 in inch
-        Ra = (256*ord(packet[4])+ord(packet[5]))*2.54/100
+        Ra = (256 * byte2int(packet[4]) + byte2int(packet[5])) * 2.54 / 100
         # byte 6-7: last 24h  /100 in inch
-        R24 = (256*ord(packet[6])+ord(packet[7]))*2.54/100
+        R24 = (256 * byte2int(packet[6]) + byte2int(packet[7])) * 2.54 / 100
         # byte 8-9: tot /100 in inch
-        Rtot = (256*ord(packet[8])+ord(packet[9]))*2.54/100
-
-
+        Rtot = (256 * byte2int(packet[8]) + byte2int(packet[9])) * 2.54 / 100
 
         _record = {
             'rain_rate': Ra,
@@ -347,12 +363,11 @@ class WMR89(weewx.drivers.AbstractDevice):
             'dateTime': int(time.time() + 0.5),
             'usUnits': weewx.METRIC
         }
-	
-	_record['rain'] = weewx.wxformulas.calculate_rain(_record['rain_total'], self.last_rain_total)            
-        self.last_rain_total = _record['rain_total']
-	
-        return _record
 
+        _record['rain'] = weewx.wxformulas.calculate_rain(_record['rain_total'], self.last_rain_total)
+        self.last_rain_total = _record['rain_total']
+
+        return _record
 
     def _wmr89_temp_packet(self, packet):
         ## b50b01006c005408fd0286
@@ -365,68 +380,66 @@ class WMR89(weewx.drivers.AbstractDevice):
         ## b5 0b 01     00 d7 00 2e  0a  fd 02 cd <<-- batterie low
         ## b5 0b 01     00 d6 00 2e  09  fd 02 cb
         ##    ?  sensor temp  ?  hum dew ?  ?  ?
-        temp=256*ord(packet[3])+ord(packet[4])
-        if temp>=32768:
-           temp=temp-65536
-        temp=(temp*0.1)
+        temp = 256 * byte2int(packet[3]) + byte2int(packet[4])
+        if temp >= 32768:
+            temp = temp - 65536
+        temp *= 0.1
 
         # According to specifications the WMR89 humidity range are 25/95% 
-        if ord(packet[6])==254:
-            hum=95
-        elif ord(packet[6])==252:
-            hum=25
+        if byte2int(packet[6]) == 254:
+            hum = 95
+        elif byte2int(packet[6]) == 252:
+            hum = 25
         else:
-            hum=float(ord(packet[6]))
+            hum = float(byte2int(packet[6]))
 
-        dew=(ord(packet[7]))
-        if dew==125:
-          dew=None
-        elif dew>125:
-          dew=((dew-256))  
+        dew = byte2int(packet[7])
+        if dew == 125:
+            dew = None
+        elif dew > 125:
+            dew -= 256
 
-        if ord(packet[8])==253:
-	  heatindex=None
+        if byte2int(packet[8]) == 253:
+            heatindex = None
         else:
-          heatindex=float(ord(packet[7]))
+            heatindex = float(byte2int(packet[7]))
 
-        if (packet[2].encode('hex')=='00'):
-          _record = {
-            'humidity_in': hum,
-            'temperature_in': float(temp),
-            'dewpoint_in': dew,
-            'dateTime': int(time.time() + 0.5),
-            'usUnits': weewx.METRIC
-          }
-        elif (packet[2].encode('hex')=='01'):
-          _record = {
-            'humidity_out': hum,
-            'temperature_out': float(temp),
-            'dewpoint_out': dew,
-            'dateTime': int(time.time() + 0.5),
-            'usUnits': weewx.METRIC
-          }
-        elif (packet[2].encode('hex')=='02'):
-          _record = {
-            'humidity_1': hum,
-            'temperature_1': float(temp),
-            'dewpoint_1': dew,
-            'dateTime': int(time.time() + 0.5),
-            'usUnits': weewx.METRIC
-          }
-        elif (packet[2].encode('hex')=='03'):
-          _record = {
-            'humidity_2': hum,
-            'temperature_2': float(temp),
-            'dewpoint_2': dew,
-            'dateTime': int(time.time() + 0.5),
-            'usUnits': weewx.METRIC
-          }
+        if packet[2] == 0:
+            _record = {
+                'humidity_in': hum,
+                'temperature_in': float(temp),
+                'dewpoint_in': dew,
+                'dateTime': int(time.time() + 0.5),
+                'usUnits': weewx.METRIC
+            }
+        elif packet[2] == 0x01:
+            _record = {
+                'humidity_out': hum,
+                'temperature_out': float(temp),
+                'dewpoint_out': dew,
+                'dateTime': int(time.time() + 0.5),
+                'usUnits': weewx.METRIC
+            }
+        elif packet[2] == 0x02:
+            _record = {
+                'humidity_1': hum,
+                'temperature_1': float(temp),
+                'dewpoint_1': dew,
+                'dateTime': int(time.time() + 0.5),
+                'usUnits': weewx.METRIC
+            }
+        elif packet[2] == 0x03:
+            _record = {
+                'humidity_2': hum,
+                'temperature_2': float(temp),
+                'dewpoint_2': dew,
+                'dateTime': int(time.time() + 0.5),
+                'usUnits': weewx.METRIC
+            }
         else:
-          _record=None
+            _record = None
 
         return _record
-
-
 
     def _wmr89_pressure_packet(self, packet):
         ## 0  1  2  3  4  5  6  7  8
@@ -434,37 +447,32 @@ class WMR89(weewx.drivers.AbstractDevice):
         ## b4 09 27 ea 28 16 03 02 0f
         ##    ?  baro  press ?  ?  ?
         ## weather display? barometric compensation
-        Pr=str((256*ord(packet[2])+ord(packet[3]))*0.1)
-        bar=str((256*ord(packet[4])+ord(packet[5]))*0.1)
-   
+        Pr = (256 * byte2int(packet[2]) + byte2int(packet[3])) * 0.1
+        bar = (256 * byte2int(packet[4]) + byte2int(packet[5])) * 0.1
+
         _record = {
-            'pressure': float(Pr),
-            'barometer': float(bar),
+            'pressure': Pr,
+            'barometer': bar,
             'dateTime': int(time.time() + 0.5),
             'usUnits': weewx.METRIC
         }
 
         return _record
 
-
-
-
-
     def _wmr89_time_packet(self, packet):
         """The (partial) time packet is not used by weewx.
         However, the last time is saved in case getTime() is called."""
-        #DateTime='20'+str(ord(packet[5])).zfill(2)+'/'+str(ord(packet[6])).zfill(2)+'/'+str(ord(packet[7])).zfill(2)+' '+str(ord(packet[8])).zfill(2)+':'+str(ord(packet[9])).zfill(2
+        # DateTime='20'+str(ord(packet[5])).zfill(2)+'/'+str(ord(packet[6])).zfill(2)+'/'+str(ord(packet[7])).zfill(2)+' '+str(ord(packet[8])).zfill(2)+':'+str(ord(packet[9])).zfill(2
 
-        #min1, min10 = self._get_nibble_data(packet[1:])
-        #minutes = min1 + ((min10 & 0x07) * 10)
+        # min1, min10 = self._get_nibble_data(packet[1:])
+        # minutes = min1 + ((min10 & 0x07) * 10)
 
-        #cur = time.gmtime()
-        #self.last_time = time.mktime(
+        # cur = time.gmtime()
+        # self.last_time = time.mktime(
         #    (cur.tm_year, cur.tm_mon, cur.tm_mday,
         #     cur.tm_hour, minutes, 0,
         #     cur.tm_wday, cur.tm_yday, cur.tm_isdst))
         return None
-
 
 
 class WMR89ConfEditor(weewx.drivers.AbstractConfEditor):
@@ -474,33 +482,31 @@ class WMR89ConfEditor(weewx.drivers.AbstractConfEditor):
 [WMR89]
     # This section is for the Oregon Scientific WMR89
 
-    # Connection type. For now, 'serial' is the only option. 
-    type = serial
-
     # Serial port such as /dev/ttyS0, /dev/ttyUSB0, or /dev/cuaU0
     port = /dev/ttyUSB0
 
-    # The station model, e.g., WMR89
-    model = WMR89
-
     # The driver to use:
     driver = weewx.drivers.wmr89
+    
+    # Sensor map: map from sensor name to observation name
+    [[sensor_map]]
 """
 
     def prompt_for_settings(self):
-        print "Specify the serial port on which the station is connected, for"
-        print "example /dev/ttyUSB0 or /dev/ttyS0."
+        print("Specify the serial port on which the station is connected, for")
+        print("example /dev/ttyUSB0 or /dev/ttyS0.")
         port = self._prompt('port', '/dev/ttyUSB0')
         return {'port': port}
 
     def modify_config(self, config_dict):
-        print """
-Setting rainRate, windchill, and dewpoint calculations to hardware."""
+        print("""
+Setting rainRate, windchill, and dewpoint calculations to hardware.""")
         config_dict.setdefault('StdWXCalculate', {})
         config_dict['StdWXCalculate'].setdefault('Calculations', {})
         config_dict['StdWXCalculate']['Calculations']['rainRate'] = 'hardware'
         config_dict['StdWXCalculate']['Calculations']['windchill'] = 'hardware'
         config_dict['StdWXCalculate']['Calculations']['dewpoint'] = 'hardware'
+
 
 # Define a main entry point for basic testing without the weewx engine.
 # Invoke this as follows from the weewx root dir:
@@ -517,7 +523,7 @@ if __name__ == '__main__':
     syslog.openlog('wmr89', syslog.LOG_PID | syslog.LOG_CONS)
     syslog.setlogmask(syslog.LOG_UPTO(syslog.LOG_DEBUG))
     weewx.debug = 2
-    
+
     parser = optparse.OptionParser(usage=usage)
     parser.add_option('--version', dest='version', action='store_true',
                       help='Display driver version')
@@ -526,17 +532,17 @@ if __name__ == '__main__':
                       default=DEFAULT_PORT)
     parser.add_option('--gen-packets', dest='gen_packets', action='store_true',
                       help="Generate packets indefinitely")
-    
-    (options, args) = parser.parse_args()
+
+    options, args = parser.parse_args()
 
     if options.version:
-        print "WMR89 driver version %s" % DRIVER_VERSION
+        print("WMR89 driver version %s" % DRIVER_VERSION)
         exit(0)
 
     if options.gen_packets:
         syslog.syslog(syslog.LOG_DEBUG, "wmr89: Running genLoopPackets()")
         stn_dict = {'port': options.port}
         stn = WMR89(**stn_dict)
-        
+
         for packet in stn.genLoopPackets():
-            print packet
+            print(packet)
