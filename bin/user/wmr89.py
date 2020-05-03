@@ -13,12 +13,12 @@ for documentation on the serial protocol
 
 from __future__ import absolute_import
 from __future__ import print_function
+
+import binascii
 import sys
 import time
-import syslog
 
 import serial
-
 import weewx.drivers
 
 # ##########################################
@@ -55,14 +55,11 @@ try:
 
     log = logging.getLogger(__name__)
 
-
     def logdbg(msg):
         log.debug(msg)
 
-
     def loginf(msg):
         log.info(msg)
-
 
     def logerr(msg):
         log.error(msg)
@@ -71,18 +68,14 @@ except ImportError:
     # Old-style weewx logging
     import syslog
 
-
     def logmsg(level, msg):
-        syslog.syslog(level, 'wmr89: %s:' % msg)
-
+        syslog.syslog(level, 'wmr89: %s' % msg)
 
     def logdbg(msg):
         logmsg(syslog.LOG_DEBUG, msg)
 
-
     def loginf(msg):
         logmsg(syslog.LOG_INFO, msg)
-
 
     def logerr(msg):
         logmsg(syslog.LOG_ERR, msg)
@@ -241,7 +234,7 @@ class WMR89(weewx.drivers.AbstractDevice):
 
     def genLoopPackets(self):
         """Generator function that continuously returns loop packets"""
-        buf = []
+
         while True:
             # request data 
             if self.serial_wrapper.inWaiting() == 0:
@@ -254,11 +247,12 @@ class WMR89(weewx.drivers.AbstractDevice):
             if buf:
                 # The start of each packet is demarcated with the hex sequence 0xf2f2. Separate them, while getting
                 # rid of any zeros
+                self.log_hex('buf', buf)
                 raw_packets = [_f for _f in buf.split(b'\xf2\xf2') if _f]
                 # Loop over each packet
                 for raw_packet in raw_packets:
                     if weewx.debug >= 2:
-                        self.log_packet(raw_packet)
+                        self.log_hex('raw_packet', raw_packet)
 
                     packet = None
 
@@ -300,9 +294,9 @@ class WMR89(weewx.drivers.AbstractDevice):
     #              Oregon Scientific WMR89 utility functions
     # ==========================================================================
 
-    def log_packet(self, packet):
-        # packet_str = ','.join(["x%x" % v for v in packet])
-        print("%d, %s, %s" % (int(time.time() + 0.5), time.asctime(), packet.encode('hex')))
+    def log_hex(self, id, packet):
+        """Log a bytearray as a hexadecimal string"""
+        logdbg("%d, %s, '%s': %s" % (int(time.time() + 0.5), time.asctime(), id, binascii.hexlify(packet)))
 
     def _wmr89_wind_packet(self, packet):
         """Decode a wind packet. Wind speed will be in kph"""
@@ -515,10 +509,25 @@ Setting rainRate, windchill, and dewpoint calculations to hardware.""")
 
 if __name__ == '__main__':
     import optparse
+    import syslog
+
+    # Redefine these so they always use syslog. This ensures running the driver directly will work under
+    # WeeWX V3 and V4.
+    def logmsg(level, msg):
+        syslog.syslog(level, 'wmr89: %s' % msg)
+
+    def logdbg(msg):
+        logmsg(syslog.LOG_DEBUG, msg)
+
+    def loginf(msg):
+        logmsg(syslog.LOG_INFO, msg)
+
+    def logerr(msg):
+        logmsg(syslog.LOG_ERR, msg)
 
     usage = """Usage: %prog --help
        %prog --version
-       %prog --gen-packets [--port=PORT]"""
+       %prog [--port=PORT]"""
 
     syslog.openlog('wmr89', syslog.LOG_PID | syslog.LOG_CONS)
     syslog.setlogmask(syslog.LOG_UPTO(syslog.LOG_DEBUG))
@@ -530,8 +539,6 @@ if __name__ == '__main__':
     parser.add_option('--port', dest='port', metavar='PORT',
                       help='The port to use. Default is %s' % DEFAULT_PORT,
                       default=DEFAULT_PORT)
-    parser.add_option('--gen-packets', dest='gen_packets', action='store_true',
-                      help="Generate packets indefinitely")
 
     options, args = parser.parse_args()
 
@@ -539,10 +546,9 @@ if __name__ == '__main__':
         print("WMR89 driver version %s" % DRIVER_VERSION)
         exit(0)
 
-    if options.gen_packets:
-        syslog.syslog(syslog.LOG_DEBUG, "wmr89: Running genLoopPackets()")
-        stn_dict = {'port': options.port}
-        stn = WMR89(**stn_dict)
+    syslog.syslog(syslog.LOG_DEBUG, "wmr89: Running genLoopPackets()")
 
-        for packet in stn.genLoopPackets():
-            print(packet)
+    stn = WMR89(port=options.port)
+
+    for packet in stn.genLoopPackets():
+        print(packet)
