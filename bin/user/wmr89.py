@@ -15,30 +15,18 @@ from __future__ import absolute_import
 from __future__ import print_function
 
 import binascii
-import sys
 import time
 
 import serial
 import weewx.drivers
 
-# ##########################################
-# The following was lifted from the utility 'six'
-# Copyright (c) 2010-2018 Benjamin Peterson
-PY2 = sys.version_info[0] == 2
-PY3 = sys.version_info[0] == 3
-
-if PY2:
-    def byte2int(bs):
-        return ord(bs[0])
-if PY3:
-    import operator
-    byte2int = operator.itemgetter(0)
-# ##########################################
-
 DRIVER_NAME = 'WMR89'
 DRIVER_VERSION = "1.0.0"
 DEFAULT_PORT = '/dev/ttyS0'
 
+
+def FtoC(x):
+    return (x - 32.0) * 5.0 / 9.0
 
 def loader(config_dict, engine):  # @UnusedVariable
     return WMR89(**config_dict[DRIVER_NAME])
@@ -208,8 +196,7 @@ class WMR89(weewx.drivers.AbstractDevice):
 
         port: The serial port of the WMR89. [Optional. Default is '/dev/ttyUSB0']
 
-        sensor_map: A dictionary that maps sensor names to emitted observation names. [Optional. Default is given by
-        WMR89.DEFAULT_MAP.]
+        sensor_map: Overrides to the default sensor mapping dictionary, WMR89.DEFAULT_MAP.
         """
 
         loginf('driver version is %s' % DRIVER_VERSION)
@@ -249,7 +236,7 @@ class WMR89(weewx.drivers.AbstractDevice):
                 # rid of any zeros
                 self.log_hex('buf', buf)
                 raw_packets = [_f for _f in buf.split(b'\xf2\xf2') if _f]
-                # Loop over each packet
+                # Loop over each packet in the set
                 for raw_packet in raw_packets:
                     if weewx.debug >= 2:
                         self.log_hex('raw_packet', raw_packet)
@@ -269,11 +256,8 @@ class WMR89(weewx.drivers.AbstractDevice):
                     else:
                         logdbg("Invalid data packet (%s)." % raw_packet)
 
-                    if packet:
-                        mapped_packet = self._sensors_to_fields(packet, self.sensor_map)
-
+                    mapped_packet = self._sensors_to_fields(packet, self.sensor_map) if packet else None
                     if mapped_packet:
-                        # print _record
                         yield mapped_packet
 
     @staticmethod
@@ -303,16 +287,16 @@ class WMR89(weewx.drivers.AbstractDevice):
         ## 0  1  2  3  4  5  6  7  8  9  10 
         ## b2 0b 00 00 00 00 00 02 7f 01 3e
         ##    ?     Wa    Wg    Wd Wc ?  CS?
-        Wa = byte2int(packet[3]) * 0.36
-        Wg = byte2int(packet[5]) * 0.36
-        Wd = byte2int(packet[7]) * 22.5
-        Wc = byte2int(packet[8])
+        Wa = packet[3] * 0.36
+        Wg = packet[5] * 0.36
+        Wd = packet[7] * 22.5
+        Wc = packet[8]
         if Wc < 125:
-            Wc = (byte2int(packet[8]) - 32) * 5.0 / 9.0
+            Wc = FtoC(packet[8])
         elif Wc == 125:
             Wc = None
         elif Wc > 125:
-            Wc = (((Wc - 255) - 32) * 5.0 / 9.0)
+            Wc = FtoC(Wc - 255)
 
         _record = {
             'wind_speed': Wa,
@@ -340,14 +324,14 @@ class WMR89(weewx.drivers.AbstractDevice):
         if packet[2:4] == b'\xff\xfe':
             Rh = None
         else:
-            Rh = (256 * byte2int(packet[2]) + byte2int(packet[3])) * 2.54 / 100
+            Rh = (256 * packet[2] + packet[3]) * 2.54 / 100
 
         # byte 4-5: actual rain /100 in inch
-        Ra = (256 * byte2int(packet[4]) + byte2int(packet[5])) * 2.54 / 100
+        Ra = (256 * packet[4] + packet[5]) * 2.54 / 100
         # byte 6-7: last 24h  /100 in inch
-        R24 = (256 * byte2int(packet[6]) + byte2int(packet[7])) * 2.54 / 100
+        R24 = (256 * packet[6] + packet[7]) * 2.54 / 100
         # byte 8-9: tot /100 in inch
-        Rtot = (256 * byte2int(packet[8]) + byte2int(packet[9])) * 2.54 / 100
+        Rtot = (256 * packet[8] + packet[9]) * 2.54 / 100
 
         _record = {
             'rain_rate': Ra,
@@ -374,29 +358,29 @@ class WMR89(weewx.drivers.AbstractDevice):
         ## b5 0b 01     00 d7 00 2e  0a  fd 02 cd <<-- batterie low
         ## b5 0b 01     00 d6 00 2e  09  fd 02 cb
         ##    ?  sensor temp  ?  hum dew ?  ?  ?
-        temp = 256 * byte2int(packet[3]) + byte2int(packet[4])
+        temp = 256 * packet[3] + packet[4]
         if temp >= 32768:
             temp = temp - 65536
         temp *= 0.1
 
         # According to specifications the WMR89 humidity range are 25/95% 
-        if byte2int(packet[6]) == 254:
+        if packet[6] == 254:
             hum = 95
-        elif byte2int(packet[6]) == 252:
+        elif packet[6] == 252:
             hum = 25
         else:
-            hum = float(byte2int(packet[6]))
+            hum = float(packet[6])
 
-        dew = byte2int(packet[7])
+        dew = packet[7]
         if dew == 125:
             dew = None
         elif dew > 125:
             dew -= 256
 
-        if byte2int(packet[8]) == 253:
+        if packet[8] == 253:
             heatindex = None
         else:
-            heatindex = float(byte2int(packet[7]))
+            heatindex = float(packet[7])
 
         if packet[2] == 0:
             _record = {
@@ -441,8 +425,8 @@ class WMR89(weewx.drivers.AbstractDevice):
         ## b4 09 27 ea 28 16 03 02 0f
         ##    ?  baro  press ?  ?  ?
         ## weather display? barometric compensation
-        Pr = (256 * byte2int(packet[2]) + byte2int(packet[3])) * 0.1
-        bar = (256 * byte2int(packet[4]) + byte2int(packet[5])) * 0.1
+        Pr = (256 * packet[2] + packet[3]) * 0.1
+        bar = (256 * packet[4] + packet[5]) * 0.1
 
         _record = {
             'pressure': Pr,
@@ -480,7 +464,7 @@ class WMR89ConfEditor(weewx.drivers.AbstractConfEditor):
     port = /dev/ttyUSB0
 
     # The driver to use:
-    driver = weewx.drivers.wmr89
+    driver = user.wmr89
     
     # Sensor map: map from sensor name to observation name
     [[sensor_map]]
@@ -492,21 +476,12 @@ class WMR89ConfEditor(weewx.drivers.AbstractConfEditor):
         port = self._prompt('port', '/dev/ttyUSB0')
         return {'port': port}
 
-    def modify_config(self, config_dict):
-        print("""
-Setting rainRate, windchill, and dewpoint calculations to hardware.""")
-        config_dict.setdefault('StdWXCalculate', {})
-        config_dict['StdWXCalculate'].setdefault('Calculations', {})
-        config_dict['StdWXCalculate']['Calculations']['rainRate'] = 'hardware'
-        config_dict['StdWXCalculate']['Calculations']['windchill'] = 'hardware'
-        config_dict['StdWXCalculate']['Calculations']['dewpoint'] = 'hardware'
-
 
 # Define a main entry point for basic testing without the weewx engine.
 # Invoke this as follows from the weewx root dir:
 #
-# PYTHONPATH=bin python bin/weewx/drivers/wmr89.py
-
+#   PYTHONPATH=bin python bin/weewx/drivers/wmr89.py
+#
 if __name__ == '__main__':
     import optparse
     import syslog
