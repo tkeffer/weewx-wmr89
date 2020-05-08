@@ -484,29 +484,19 @@ class WMR89ConfEditor(weewx.drivers.AbstractConfEditor):
 #
 if __name__ == '__main__':
     import optparse
-    import syslog
+    weewx.debug = 2
 
-    # Redefine these so they always use syslog. This ensures running the driver directly will work under
-    # WeeWX V3 and V4.
-    def logmsg(level, msg):
-        syslog.syslog(level, 'wmr89: %s' % msg)
-
-    def logdbg(msg):
-        logmsg(syslog.LOG_DEBUG, msg)
-
-    def loginf(msg):
-        logmsg(syslog.LOG_INFO, msg)
-
-    def logerr(msg):
-        logmsg(syslog.LOG_ERR, msg)
+    try:
+        # WeeWX V4 logging
+        weeutil.logger.setup('wmr89', {})
+    except NameError:
+        # WeeWX V3 logging
+        syslog.openlog('wmr89', syslog.LOG_PID | syslog.LOG_CONS)
+        syslog.setlogmask(syslog.LOG_UPTO(syslog.LOG_DEBUG))
 
     usage = """Usage: %prog --help
        %prog --version
        %prog [--port=PORT]"""
-
-    syslog.openlog('wmr89', syslog.LOG_PID | syslog.LOG_CONS)
-    syslog.setlogmask(syslog.LOG_UPTO(syslog.LOG_DEBUG))
-    weewx.debug = 2
 
     parser = optparse.OptionParser(usage=usage)
     parser.add_option('--version', dest='version', action='store_true',
