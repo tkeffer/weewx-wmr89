@@ -15,7 +15,7 @@ def loader():
 class WMR89Installer(ExtensionInstaller):
     def __init__(self):
         super(WMR89Installer, self).__init__(
-            version="1.0.0",
+            version="1.0.1",
             name='wmr89',
             description='Driver for the Oregon Scientific WMR89',
             author="Thomas Keffer",

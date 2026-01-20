@@ -1,5 +1,5 @@
 #
-#    Copyright (c) 2012=2020 Will Page <compenguy@gmail.com>
+#    Copyright (c) 2012=2026 Will Page <compenguy@gmail.com>
 #    and Tom Keffer <tkeffer@gmail.com>
 #
 #    See the file LICENSE.txt for your full rights.
@@ -21,7 +21,7 @@ import serial
 import weewx.drivers
 
 DRIVER_NAME = 'WMR89'
-DRIVER_VERSION = "1.0.0"
+DRIVER_VERSION = "1.0.1"
 DEFAULT_PORT = '/dev/ttyS0'
 
 
