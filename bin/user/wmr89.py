@@ -6,7 +6,7 @@
 #
 """Classes and functions for interfacing with Oregon Scientific WMR89,
 
-See 
+See
   https://www.wxforum.net/index.php?topic=27581
 for documentation on the serial protocol
 """
@@ -210,6 +210,7 @@ class WMR89(weewx.drivers.AbstractDevice):
 
         # Create the specified port
         self.serial_wrapper = SerialWrapper(self.port)
+        self.serial_wrapper.flush_input()
 
     @property
     def hardware_name(self):
@@ -223,7 +224,7 @@ class WMR89(weewx.drivers.AbstractDevice):
         """Generator function that continuously returns loop packets"""
 
         while True:
-            # request data 
+            # request data
             if self.serial_wrapper.inWaiting() == 0:
                 self.serial_wrapper.write(b'\xd1\x00')
                 time.sleep(0.5)
@@ -284,7 +285,7 @@ class WMR89(weewx.drivers.AbstractDevice):
 
     def _wmr89_wind_packet(self, packet):
         """Decode a wind packet. Wind speed will be in kph"""
-        ## 0  1  2  3  4  5  6  7  8  9  10 
+        ## 0  1  2  3  4  5  6  7  8  9  10
         ## b2 0b 00 00 00 00 00 02 7f 01 3e
         ##    ?     Wa    Wg    Wd Wc ?  CS?
         Wa = packet[3] * 0.36
@@ -313,13 +314,13 @@ class WMR89(weewx.drivers.AbstractDevice):
         ## 0  1  2  3  4  5  6  7    8  9  10 11 12 13 14 15 16
         ## b1 11 ff fe 00 08 00 22   00 48 0e 01 01 0d 18 03 66
         ## b1 11 ff fe 00 11 00 11   00 95 0e 01 01 0d 18 03 ab: 4,3 mm  / 11 = 17
-        ## b1 11 ff fe 00 ca 00 db   00 5f 0e 01 01 0d 18 04 f8: 116,3 mm - 163,1 / db=219 / 
-        ## b1 11 ff fe 00 2a 00 3b   00 be 0e 01 01 0d 18 04 17: 270,8mm - 309,6 / 3b=59 / 
+        ## b1 11 ff fe 00 ca 00 db   00 5f 0e 01 01 0d 18 04 f8: 116,3 mm - 163,1 / db=219 /
+        ## b1 11 ff fe 00 2a 00 3b   00 be 0e 01 01 0d 18 04 17: 270,8mm - 309,6 / 3b=59 /
         ##    ?  r/h-- rain  last24  Rtot  ?  ?  ?  ?  ?  ?  CS?
         # station units are inch and inch/hr while the internal metric units are
-        # cm and cm/hr. 
+        # cm and cm/hr.
 
-        # byte 2-3: rain per hour  
+        # byte 2-3: rain per hour
         # fffe = no value
         if packet[2:4] == b'\xff\xfe':
             Rh = None
@@ -363,7 +364,7 @@ class WMR89(weewx.drivers.AbstractDevice):
             temp = temp - 65536
         temp *= 0.1
 
-        # According to specifications the WMR89 humidity range are 25/95% 
+        # According to specifications the WMR89 humidity range are 25/95%
         if packet[6] == 254:
             hum = 95
         elif packet[6] == 252:
@@ -465,7 +466,7 @@ class WMR89ConfEditor(weewx.drivers.AbstractConfEditor):
 
     # The driver to use:
     driver = user.wmr89
-    
+
     # Sensor map: map from sensor name to observation name
     [[sensor_map]]
 """
